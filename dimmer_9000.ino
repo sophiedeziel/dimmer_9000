@@ -1,7 +1,6 @@
 #include "AiEsp32RotaryEncoder.h"
 #include <EEPROM.h>
 #include <Ticker.h>
-#include <Preferences.h>
 
 #define EEPROM_SIZE 32
 
