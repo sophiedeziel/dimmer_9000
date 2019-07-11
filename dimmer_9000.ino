@@ -1,4 +1,5 @@
 #include "AiEsp32RotaryEncoder.h"
+#include <Preferences.h>
 
 #define ENCODER_I_A_PIN GPIO_NUM_34
 #define ENCODER_I_B_PIN GPIO_NUM_35
