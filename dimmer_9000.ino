@@ -1,5 +1,9 @@
 #include "AiEsp32RotaryEncoder.h"
+#include <EEPROM.h>
+#include <Ticker.h>
 #include <Preferences.h>
+
+#define EEPROM_SIZE 32
 
 #define ENCODER_I_A_PIN GPIO_NUM_34
 #define ENCODER_I_B_PIN GPIO_NUM_35
@@ -18,9 +22,26 @@ int16_t temperatureValue = 0;
 const int16_t intensityMax = 15;
 const int16_t temperatureMax = 30;
 
+Ticker tkDac;
+Preferences preferences;
+
+volatile int last_save = 0;
+
+void ICACHE_RAM_ATTR _onTimer() {
+  if (last_save < millis() - 10000) {
+    last_save = millis();
+    Serial.println("Saving");
+    EEPROM.commit();
+  }
+}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  if (!EEPROM.begin(EEPROM_SIZE))
+  {
+    Serial.println("failed to initialise EEPROM"); delay(1000000);
+  }
 
   Serial.println("Ready");
 
@@ -33,6 +54,10 @@ void setup() {
   intensityEncoder.setBoundaries(0, intensityMax, false);
   temperatureEncoder.setBoundaries(0, temperatureMax, false);
 
+  Serial.println(EEPROM.readShort(INTENSITY_EEPROM_LOCATION));
+  intensityEncoder.reset(EEPROM.readShort(INTENSITY_EEPROM_LOCATION));
+  temperatureEncoder.reset(EEPROM.readShort(TEMPERATURE_EEPROM_LOCATION));
+
   ledcSetup(0, 5000, 13);
   ledcSetup(1, 5000, 13);
   ledcAttachPin(LED_WARM_PIN, 0);
@@ -43,9 +68,21 @@ void loop() {
   intensityValue   = intensityEncoder.readEncoder();
   temperatureValue = temperatureEncoder.readEncoder();
 
+  bool commit = false;
+  if ( intensityValue != EEPROM.readShort(INTENSITY_EEPROM_LOCATION) ) {
+    EEPROM.writeShort(INTENSITY_EEPROM_LOCATION, intensityValue);
+    commit = true;
+  }
+
+  if ( temperatureValue != EEPROM.readShort(TEMPERATURE_EEPROM_LOCATION) ) {
+    EEPROM.writeShort(TEMPERATURE_EEPROM_LOCATION, temperatureValue);
+    commit = true;
+  }
   delay(50);
-  Serial.println("");
-}
+
+  if (commit) {
+    tkDac.attach_ms(20000, _onTimer);
+  }
 
   int16_t globalIntensity = map(intensityValue, 0 , intensityMax, 0, 8191);
   int16_t warm_intensity = map(temperatureValue, 0, temperatureMax, 0 , globalIntensity);
@@ -53,6 +90,4 @@ void loop() {
 
   ledcWrite(0, warm_intensity);
   ledcWrite(1, cold_intensity);
-
-
 }
