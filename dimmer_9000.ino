@@ -22,12 +22,11 @@ const int16_t intensityMax = 15;
 const int16_t temperatureMax = 30;
 
 Ticker tkDac;
-Preferences preferences;
 
 volatile int last_save = 0;
 
 void ICACHE_RAM_ATTR _onTimer() {
-  if (last_save < millis() - 10000) {
+  if (last_save < millis() - 5000) {
     last_save = millis();
     Serial.println("Saving");
     EEPROM.commit();
@@ -80,7 +79,7 @@ void loop() {
   delay(50);
 
   if (commit) {
-    tkDac.attach_ms(20000, _onTimer);
+    tkDac.attach_ms(5000, _onTimer);
   }
 
   int16_t globalIntensity = map(intensityValue, 0 , intensityMax, 0, 8191);
