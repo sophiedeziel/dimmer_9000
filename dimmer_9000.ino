@@ -8,14 +8,12 @@
 #include <AutoConnect.h>
 #include <AutoConnectCredential.h>
 #include <PageBuilder.h>
+#include <FS.h>
+#include <SPIFFS.h>
 
-// Specified the offset if the user data exists.
-// The following two lines define the boundalyOffset value to be supplied to
-// AutoConnectConfig respectively. It may be necessary to adjust the value
-// accordingly to the actual situation.
-
-//#define CREDENTIAL_OFFSET 0
 #define CREDENTIAL_OFFSET 64
+#define INTENSITY_EEPROM_LOCATION 0
+#define TEMPERATURE_EEPROM_LOCATION 16
 #define EEPROM_SIZE 32
 
 #define ENCODER_I_A_PIN GPIO_NUM_34
@@ -24,15 +22,13 @@
 #define ENCODER_T_B_PIN GPIO_NUM_21
 #define LED_WARM_PIN GPIO_NUM_22
 #define LED_COLD_PIN GPIO_NUM_23
-#define INTENSITY_EEPROM_LOCATION 0
-#define TEMPERATURE_EEPROM_LOCATION 16
 
 WebServer Server;
 
-AutoConnect      Portal(Server);
+AutoConnect Portal(Server);
+
 String viewIntensity(PageArgument&);
 String viewTemperature(PageArgument&);
-String viewCredential(PageArgument&);
 String saveLightSettings(PageArgument&);
 
 AiEsp32RotaryEncoder intensityEncoder = AiEsp32RotaryEncoder(ENCODER_I_A_PIN, ENCODER_I_B_PIN, -1, -1);
@@ -46,81 +42,20 @@ const int16_t temperatureMax = 30;
 Ticker tkDac;
 
 volatile int last_save = 0;
-
-/**
-    An HTML for the operation page.
-    In PageBuilder, the token {{SSID}} contained in an HTML template below is
-    replaced by the actual SSID due to the action of the token handler's
-   'viewCredential' function.
-    The number of the entry to be deleted is passed to the function in the
-    POST method.
-*/
-static const char PROGMEM html[] = R"*lit(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-  html {
-  font-family:Helvetica,Arial,sans-serif;
-  -ms-text-size-adjust:100%;
-  -webkit-text-size-adjust:100%;
-  }
-  .menu > a:link {
-    position: absolute;
-    display: inline-block;
-    right: 12px;
-    padding: 0 6px;
-    text-decoration: none;
-  }
-  </style>
-</head>
-<body>
-<div class="menu">{{AUTOCONNECT_MENU}}</div>
-<form action="/intensity" method="POST">
-  <p>Set new light intensity:</p>
-  <input type="number" min="0" name="intensity" value="{{INTENSITY}}">
-  <p>Set new light temperature:</p>
-  <input type="number" min="0" name="temperature" value="{{TEMPERATURE}}">
-  <input type="submit">
-</form>
-</body>
-</html>
-)*lit";
-
 static const char PROGMEM autoconnectMenu[] = { AUTOCONNECT_LINK(BAR_24) };
 
 // URL path as '/'
-PageElement elmList(html,
-  {{ "INTENSITY", viewIntensity },
-   { "TEMPERATURE", viewTemperature},
-    { "SSID", viewCredential },
-   { "AUTOCONNECT_MENU", [](PageArgument& args) {
-                            return String(FPSTR(autoconnectMenu));} }
-  });
+PageElement elmList("file:/index.htm",{
+ { "INTENSITY", viewIntensity },
+ { "TEMPERATURE", viewTemperature},
+ { "AUTOCONNECT_MENU", [](PageArgument& args) {
+                          return String(FPSTR(autoconnectMenu));} }
+});
 PageBuilder rootPage("/", { elmList });
 
 // URL path as '/del'
 PageElement elmDel("{{DEL}}", {{ "DEL", saveLightSettings }});
-PageBuilder delPage("/intensity", { elmDel });
-
-// Retrieve the credential entries from EEPROM, Build the SSID line
-// with the <li> tag.
-String viewCredential(PageArgument& args) {
-  AutoConnectCredential  ac(CREDENTIAL_OFFSET);
-  struct station_config  entry;
-  String content = "";
-  uint8_t  count = ac.entries();          // Get number of entries.
-
-  for (int8_t i = 0; i < count; i++) {    // Loads all entries.
-    ac.load(i, &entry);
-    // Build a SSID line of an HTML.
-    content += String("<li>") + String((char *)entry.ssid) + String("</li>");
-  }
-
-  // Returns the '<li>SSID</li>' container.
-  return content;
-}
+PageBuilder settingPage("/setting", { elmDel });
 
 String viewIntensity(PageArgument& args) {
   return String(intensityValue);
@@ -155,7 +90,7 @@ String saveLightSettings(PageArgument& args) {
   Server.send(302, "text/plain", "");
   Server.client().flush();
   Server.client().stop();
- 
+
   return "";
 }
 
@@ -176,6 +111,18 @@ void setup() {
   }
 
   Serial.println("Ready");
+  if (SPIFFS.begin()) {
+    Serial.println("SPIFFS MOUNTED");
+  }
+  else {
+    Serial.println("SPIFFS MOUNT FAIL");
+  }
+  if (SPIFFS.exists("/index.htm")) {
+    Serial.println("FILE EXIST");
+  }
+  else {
+    Serial.println("FILE NOT EXIST");
+  }
 
   intensityEncoder.begin();
   temperatureEncoder.begin();
@@ -195,8 +142,8 @@ void setup() {
   ledcAttachPin(LED_WARM_PIN, 0);
   ledcAttachPin(LED_COLD_PIN, 1);
 
-  rootPage.insert(Server);    // Instead of Server.on("/", ...);
-  delPage.insert(Server);     // Instead of Server.on("/del", ...);
+  rootPage.insert(Server); 
+  settingPage.insert(Server);
 
   // Set an address of the credential area.
   AutoConnectConfig Config;
@@ -230,8 +177,8 @@ void loop() {
   }
 
   int16_t globalIntensity = map(intensityValue, 0 , intensityMax, 0, 8191);
-  int16_t warm_intensity = map(temperatureValue, 0, temperatureMax, 0 , globalIntensity);
-  int16_t cold_intensity = map(temperatureMax - temperatureValue, 0, temperatureMax, 0 , globalIntensity);
+  int16_t warm_intensity  = map(temperatureValue, 0, temperatureMax, 0 , globalIntensity);
+  int16_t cold_intensity  = map(temperatureMax - temperatureValue, 0, temperatureMax, 0 , globalIntensity);
 
   ledcWrite(0, warm_intensity);
   ledcWrite(1, cold_intensity);

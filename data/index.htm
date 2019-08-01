@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+  html {
+  font-family:Helvetica,Arial,sans-serif;
+  -ms-text-size-adjust:100%;
+  -webkit-text-size-adjust:100%;
+  }
+  .menu > a:link {
+    position: absolute;
+    display: inline-block;
+    right: 12px;
+    padding: 0 6px;
+    text-decoration: none;
+  }
+  </style>
+</head>
+<body>
+<div class="menu">{{AUTOCONNECT_MENU}}</div>
+<form action="/setting" method="POST">
+  <p>Set new light intensity:</p>
+  <input type="number" min="0" name="intensity" value="{{INTENSITY}}">
+  <p>Set new light temperature:</p>
+  <input type="number" min="0" name="temperature" value="{{TEMPERATURE}}">
+  <input type="submit">
+</form>
+</body>
+</html>
