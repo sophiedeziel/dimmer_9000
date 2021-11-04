@@ -1,53 +1,42 @@
 #include "AiEsp32RotaryEncoder.h"
 #include <EEPROM.h>
+#include <Ticker.h>
 
 #include <WiFi.h>
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-#define CREDENTIAL_OFFSET 64
-#define INTENSITY_EEPROM_LOCATION 0
-#define TEMPERATURE_EEPROM_LOCATION 16
-#define EEPROM_SIZE 32
-
-#define ENCODER_I_A_PIN GPIO_NUM_34
-#define ENCODER_I_B_PIN GPIO_NUM_35
-#define ENCODER_T_A_PIN GPIO_NUM_19
-#define ENCODER_T_B_PIN GPIO_NUM_21
-#define LED_WARM_PIN GPIO_NUM_22
-#define LED_COLD_PIN GPIO_NUM_23
-
 #include "Settings.h"
+
 WiFiClient espClient;
 PubSubClient client(espClient);
+Ticker tkDac;
 
 AiEsp32RotaryEncoder intensityEncoder = AiEsp32RotaryEncoder(ENCODER_I_A_PIN, ENCODER_I_B_PIN, -1, -1);
 AiEsp32RotaryEncoder temperatureEncoder = AiEsp32RotaryEncoder(ENCODER_T_A_PIN, ENCODER_T_B_PIN, -1, -1);
 
-int16_t intensityValue = 15;
-int16_t temperatureValue = 15;
-const int16_t intensityMax = 60;
-const int16_t temperatureMax = 60;
-
-bool commit = false;
-
 volatile int last_save = 0;
+bool saving = false;
+
+void ICACHE_RAM_ATTR _onTimer() {
+  if (last_save < millis() - 1000) {
+    last_save = millis();
+    
+    EEPROM.writeShort(INTENSITY_EEPROM_LOCATION, intensityValue);
+    EEPROM.writeShort(TEMPERATURE_EEPROM_LOCATION, temperatureValue);
+    EEPROM.commit();
+    Serial.println("Saved");
+    saving = false;
+  }
+}
 
 void setup() {
-  // put your setup code here, to run once:
   Serial.begin(115200);
   if (!EEPROM.begin(EEPROM_SIZE))
   {
     Serial.println("failed to initialise EEPROM"); delay(1000000);
   }
-
-  Serial.println(" bytes read from Flash . Values are:");
-  for (int i = 0; i < EEPROM_SIZE; i++)
-  {
-    Serial.print(byte(EEPROM.read(i))); Serial.print(" ");
-  }
-
   Serial.println("EEPROM ready");
 
   WiFi.mode(WIFI_STA);
@@ -99,7 +88,6 @@ void setup() {
   });
 
   ArduinoOTA.onEnd([]() { // do a fancy thing with our board led at end
-
     ESP.restart();
   });
 
@@ -120,32 +108,30 @@ void loop() {
   if (!client.connected()) {
     reconnectMqtt();
   }
-//  
+ 
   client.loop();
-  
+
+  updateLightSettings();
+}
+
+void updateLightSettings() {
   intensityValue   = intensityEncoder.readEncoder();
   temperatureValue = temperatureEncoder.readEncoder();
 
-  
-  if ( intensityValue != EEPROM.readShort(INTENSITY_EEPROM_LOCATION) ) {
-    EEPROM.writeShort(INTENSITY_EEPROM_LOCATION, intensityValue);
-    commit = true;
-  }
-
-  if ( temperatureValue != EEPROM.readShort(TEMPERATURE_EEPROM_LOCATION) ) {
-    EEPROM.writeShort(TEMPERATURE_EEPROM_LOCATION, temperatureValue);
-    commit = true;
-  }
-
-  if (commit) {
-    EEPROM.commit();
-    Serial.println("EEPROM saved");
-    commit = false;
+  if ( 
+    (intensityValue != EEPROM.readShort(INTENSITY_EEPROM_LOCATION)) 
+      || (temperatureValue != EEPROM.readShort(TEMPERATURE_EEPROM_LOCATION))
+     ) {
+      if (saving == false) {
+        Serial.println("Sending save command");
+        tkDac.once_ms(1000, _onTimer);
+        saving = true;
+      }
   }
 
   int16_t globalIntensity = map(intensityValue, 0 , intensityMax, 0, 8191);
-  int16_t warm_intensity  = map(temperatureValue, 0, temperatureMax, 0 , globalIntensity);
-  int16_t cold_intensity  = map(temperatureMax - temperatureValue, 0, temperatureMax, 0 , globalIntensity);
+  int16_t cold_intensity  = map(temperatureValue, 0, temperatureMax, 0 , globalIntensity);
+  int16_t warm_intensity  = map(temperatureMax - temperatureValue, 0, temperatureMax, 0 , globalIntensity);
 
   ledcWrite(0, warm_intensity);
   ledcWrite(1, cold_intensity);
